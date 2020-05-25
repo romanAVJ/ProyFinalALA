@@ -1,0 +1,119 @@
+---
+title: "Walmart Time Series Analysis"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(forecast)
+library(ggplot2)
+#library(FitARMA)
+#ggtsdisplay(mdeaths)
+require(plotrix)
+#library(car)
+```
+
+```{r}
+# Lectura de archivos
+#datos = read.csv("ventas_walmart_tepeyac.csv")
+# Esta opción es para cargar la base de datos directo en R
+datos = ventas_walmart_tepeyac$v_txs
+# Declarar nuestra serie de tiempo
+serie = ts(datos,star=c(2019,06,01),frequency = 365)
+plot.ts(serie)
+```
+
+```{r}
+# Convertir la serie de tiempo en estacionaria
+# Transformacion para estabilizar la varianza
+lambda <- BoxCox.lambda(serie,method ="guerrero")
+cat("Lambda metodo Guerrero: ",lambda)
+serie1 <- BoxCox(serie, lambda = lambda)
+plot.ts(serie1)
+
+# Toma de diferencias para estabilizar el nivel
+tsstationary <- diff(serie1, differences=1)
+tsstationary <- diff(serie1, differences=1,lag = 14)
+ggtsdisplay(tsstationary, main = "Serie estacionaria")
+
+# Buscamos la menor desviación estandar para definir las diferencias
+sd(tsstationary)
+
+# mismas gráficas que la anterior (ggtsdisplay), pero por separado
+plot.ts(tsstationary)
+ggAcf(tsstationary,lag.max = 24,ci=.95)
+ggPacf(tsstationary,lag.max = 24,ci=.95)
+```
+
+```{r}
+# Modelo recomendado por el método auto.arima
+auto.arima(diff(serie,lag=14))
+```
+
+```{r}
+# Contrucción del modelo
+fitARIMA <- arima(serie,order=c(7,0,0),seasonal = list(order=c(1,1,0), period = 14),fixed=c(0,0,0,0,0,0,NA,NA))
+fitARIMA
+
+# Coeficientes con sus intervalos de confianza
+y = coef(fitARIMA)
+confint(fitARIMA,level=.95)
+
+# Funciones de Autocorrelación
+ggAcf(fitARIMA,lag.max = 24,ci=.95)
+ggPacf(fitARIMA,lag.max = 24,ci=.95)
+
+#Fitted values
+serieEst <- fitted(fitARIMA)
+ts.plot(serie, serieEst, gpars = list(col = c("black", "red"), main ="Serie Real vs Modelo"))
+```
+
+```{r}
+#Gráficas rápidas para el analisis de residuos
+checkresiduals(fitARIMA)
+plot(residuals(fitARIMA))
+```
+
+```{r}
+# Validación de Supuestos
+#Residuos
+residuos <- residuals(fitARIMA)
+plot(residuos)
+
+# Correlación entre parámetros estimados
+
+# Desviación estandar de los residuos
+sd(residuos)
+
+# Independencia de los residuos
+checkresiduals(fitARIMA, plot = FALSE)
+
+# Autocorrelaciones iguales a cero
+ggAcf(residuos, lag.max = 24, ci=.95)
+
+# Residuos grandes = observaciones atípicas
+boxplot.stats(residuos)
+qqnorm(residuos)
+qqline(residuos)
+```
+
+
+```{r}
+# Pronosticos
+pronos <- forecast(fitARIMA,h=51,level = 70)
+autoplot(pronos)
+#fitARIMA %>% forecast(h=60) %>% autoplot()
+
+#Validacion de pronosticos
+obsReales <- ts(walmart_tepeyac_validacion$v_txs,star=c(2019,128),frequency = 365)
+# Grafica Valores reales vs pronosticos
+ts.plot(obsReales, pronos$mean, gpars = list(col = c("black", "red"),main ="Valores reales vs pronosticos"))
+# Grafica Valores reales vs Int. Conf. del 70%
+ts.plot(obsReales, pronos$upper, pronos$lower, gpars = list(col = c("black", "blue", "red"),lty = c(1,2,2),main ="Valores reales vs Int. Conf. del 70%"))
+
+residuos2 <- obsReales - pronos$mean
+# Grafica de los residuos
+plot(residuos2,main ="Residuos vs Int. Conf. del 70%")
+lines(pronos$mean - pronos$lower, col = "blue", lty = 2)
+lines(pronos$mean - pronos$upper, col = "blue", lty = 2)
+```
