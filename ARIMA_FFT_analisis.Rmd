@@ -1,0 +1,224 @@
+---
+title: "ARIMA and FFT fit"
+output: html_notebook
+---
+
+```{r libraries}
+library(ggplot2)
+library(forecast)
+library(dplyr)
+library(lubridate)
+library(purrr)
+```
+
+
+Primero se analizará la serie de tiempo vía modelos ARIMA y luego una FFT.
+
+# EDA
+
+Se ajustarán los datos de los últimos 70 días, debido a que son los que tienen más pronunciada su estacionalidad. La fecha de corte fue
+el 25 de mayo del 2020.
+```{r edatrans}
+# read data
+df_trans <- read.csv(file = 'Data/trans_all.csv', header = TRUE, stringsAsFactors = FALSE) %>% map_df(rev)
+n <- nrow(df_trans)
+trans60 <- df_trans[(n-69):n, 'num_trans'] %>% as.matrix()
+
+# parse data to ts object (forecast)
+# create daily times from
+inds <- seq(as.Date('2020-03-06'), as.Date('2020-05-24'), by = 'day')
+ts_trans <- ts(trans60, start = c(2020, as.numeric(format(inds[1], '%j'))), frequency = 7)
+
+```
+
+Graficamos la serie de tiempo y su posible estacionalidad
+
+```{r edatransplot}
+# plot time series
+autoplot(ts_trans, color = 'navy') + theme_minimal()
+
+# plot seasonality
+# linear
+ggseasonplot(ts_trans, season.labels = TRUE) + theme_minimal()
+
+#polar
+ggseasonplot(ts_trans, season.labels = TRUE, polar = TRUE) + theme_minimal()
+
+# mean value by day
+ggsubseriesplot(ts_trans)
+
+#lag plots
+gglagplot(ts_trans) # look all the noise except for lag 7 
+
+# data-seasonal-trend-reminder
+descomposedTS <- stl(ts_trans[,'num_trans'], s.window = 'periodic') 
+descomposedTS %>% autoplot()
+
+
+```
+
+## Estacionar la serie e inducir normalidad
+
+
+### Tranformación Box-Cox
+Usamos el método de Victor Guerrero para encontrar la transofrmación estabilizadora de varianza
+```{r}
+# lambda
+lambda <- df_trans %>%  BoxCox.lambda(method = 'guerrero') # lambda = 1 ==> no more changes
+```
+
+### Diferenciación
+
+```{r}
+# look trend
+ggtsdisplay(ts_trans)
+
+
+# differentiate
+ts_transD <- diff(ts_trans)
+
+# plot new trend
+ggtsdisplay(ts_transD)
+
+
+# function to determine number of appropiate differences
+ndif <- ndiffs(ts_trans) #0 
+
+# level
+mu <- mean(ts_trans)
+
+# new serie
+ts_trans <- ts_trans - mu
+```
+
+
+
+
+
+# FFT Analisis
+
+## Frequency domain observations.
+
+_NOTA:_ 
+
+- NO SE PORQUÉ, pero el primer término lo debemos quitar. Creo que es porque en la matriz de la FFT, el primer renglon son 1's y entonces sería como el "promedio espectral" y pues no tiene mucho sentido.
+- Como $n$ es par, solo necesitamos la mitad de la info para tomar la frecuencia
+- Se me hace muy raro los datos del 30 a 40 queda en 0.
+
+Observamos estacionalidad "decreciente" (valores mayores a 7.5)
+
+Como no empieza en domingo la serie, está desfazado por __dos__ días la estacionalidad. Vemos que si hay, aunque tenue, periodicidad cada 7 días en jueves. Como el EDA de series de tiempo proponía.
+
+```{r }
+# fast fourier transform
+n <- 70 # total data
+df_fft <- data.frame(coef = fft(trans60) / 70, freqindex = 1:70)
+
+# look to the spectrum
+df_fft[2:n,] %>% 
+  ggplot(aes(freqindex, Mod(num_trans))) + 
+  geom_line() 
+
+# identify peaks
+df_fft[ Mod(df_fft$num_trans) > 7.5 & df_fft$freqindex < n/2, 'freqindex' ] - 1
+
+```
+
+## Fourier y series de tiempo
+
+```{r nffFunction}
+
+nff <-  function(x = NULL, n = NULL, up = 10L, plot = TRUE, add = FALSE, main = NULL, ...){
+  #size of the signal
+  N <- length(x)
+  
+  #The direct transformation
+  #The first frequency is DC, the rest are duplicated
+  dff <-  fft(x)
+  #The time
+  t <-  seq(from = 1, to = N)
+  #Upsampled time
+  nt <-  seq(from = 1, to = N+1-1/up, by = 1/up)
+  
+  #New spectrum
+  ndff <-  array(data = 0, dim = c(length(nt), 1L))
+  ndff[1] <-  dff[1] #Always, it's the DC component
+  if(n != 0){
+    ndff[2:(n+1)] <-  dff[2:(n+1)] #The positive frequencies always come first
+    #The negative ones are trickier
+    ndff[length(ndff):(length(ndff) - n + 1)] <-  dff[N:(N - n + 1)]
+  }
+  
+  #The inverses
+  indff <-  fft(ndff/N, inverse = TRUE) ### !
+  idff <-  fft(dff/N, inverse = TRUE) ### ! N - 73
+  if(plot){
+    if(!add){
+      plot(x = t, y = x, pch = 16L, xlab = "Time", ylab = "Measurement",
+        main = ifelse(is.null(main), paste(n, "harmonics"), main))
+      lines(y = Mod(idff), x = t, col = adjustcolor(1L, alpha = 0.5))
+    }
+    lines(y = Mod(indff), x = nt, ...)
+  }
+  ret <-  data.frame(time = nt, y = Mod(indff))
+  return(ret)
+}
+
+
+```
+
+```{r}
+# look different number of armonics
+nff(x = trans60, n = 7L, up = 70L, col = 2L)
+nff(x = trans60, n = 14L, up = 200L, col = 'navy')
+nff(x = trans60, n = 20L, up = 200L, col = 'green')
+
+```
+Grafiquemos todas las armónicas
+
+(hay que citar a este gran wei https://stackoverflow.com/questions/41435777/perform-fourier-analysis-to-a-time-series-in-r/41465250)
+```{r}
+colors <- viridis::viridis(15)
+for(i in 1:15){
+  ad = ifelse(i == 1, FALSE, TRUE)
+  nff(x = trans60, n = i, up = 100L, col = colors[i], add = ad, main = "All waves up to 15th harmonic")
+}
+
+
+
+```
+
+
+# ARIMA 
+
+Ahora construimos el modelo ARIMA. Sabemos de antemano que $\lambda = 1$ y que $\nabla = 0$, por lo que se trabajará con la serie original.
+
+Al ver la AC y ACP de la serie de tiempo, es razonable pensar en un modelo ARMA({1,2},{4})Est({7})Season, pero veamos el modelo que el algoritmo escoje.
+
+Vemos que el modelo que escoje es un modelo MA1, este modelo lo modemos pasar como AR($\infty$), (desarrollar serie geométrica). Esto puede explicar la transaccionalidad como una función de ellas mismas con respecto al _periodo_ pasado, no al día anterior. 
+
+```{r}
+# recomended model from forecast package
+auto.arima(ts_trans)
+```
+
+
+
+# TBATS: Modelo trigonométrico, BoxCox, Autoregresivo, estacional.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
