@@ -197,14 +197,106 @@ Al ver la AC y ACP de la serie de tiempo, es razonable pensar en un modelo ARMA(
 
 Vemos que el modelo que escoje es un modelo MA1, este modelo lo modemos pasar como AR($\infty$), (desarrollar serie geométrica). Esto puede explicar la transaccionalidad como una función de ellas mismas con respecto al _periodo_ pasado, no al día anterior. 
 
+Se realizó una búsqueda más potente, pero la log verosimilitud mejoró prácticamente nada y por el principio de _parsimonia_ nos quedamos con el modelo ARIMA(0,0,0)(0,1,1)[7]. Hay que comprobar supuestos para poder usar dicho modelo.
+
 ```{r}
 # recomended model from forecast package
-auto.arima(ts_trans)
+fit1 <- auto.arima(ts_trans, approximation = FALSE,  stepwise = FALSE) # harder search
+fit2 <- auto.arima(ts_trans) # simpler search
+
+```
+
+Por lo anterior, hacemos el ajuste del modelo ARIMA(0,0,0)(0,1,1)[7]
+
+```{r}
+# look ACF and PACF 
+ts_trans %>% diff(lag = 7) %>% ggtsdisplay()
+```
+Vemos que efectivamente es un modelo ARIMA(0,0,0)(0,1,1)[7], aunque pudiera pensarse también en un ARIMA(3,0,0)(1,1,0)[7] cuyos coeficientes 1 y 2 son ceros. Por tanto trabajaremos con _fit2_ (si da tiempo metemos este ultimo modelo).
+
+## Check assumptions
+
+Por las graficas a continuación, la prueba Q-Ljung-Box y los valores atípicos, tenemos un modelo "válido".
+
+```{r}
+# 1. ACF & PACF for residuals
+fit2 %>% residuals() %>% ggtsdisplay() #looks good
+
+# 2. Check normality
+fit2 %>% checkresiduals() #p-value 0.2, ok
+
+# 3. Look outliers
+fit2 %>% residuals() %>% boxplot() # 3 outliers
+fit2 %>% residuals() %>% qqnorm() # 3 outliers
+fit2 %>% residuals() %>% qqline() 
+```
+
+## Predicción 
+
+Predecimos para las dos semanas con doble IC al nivel 80% y 95%.
+
+```{r}
+# forecast
+fit2 %>% forecast(h = 28, level = c(80,95)) %>% autoplot()
+
+
+```
+
+# Modelo de regresión dinámico armónico
+
+A continuación ajustaremos un modelo armónico con error ARIMA. Los coeficientes de fourier sólamente pueden llegar hasta $m/2$, donde m siginifca el periodo.
+
+Vemos que el que mejor captura la información es el que tiene 3 coeficientes de fourier
+```{r}
+# intialize
+plots <- list()
+
+# take out seasonality
+ts_transDS <- ts_trans %>% diff(lag = 7)
+
+# routine to gather the best number of harmonics
+for (i in 1:3){
+  # fit model
+  fit <- auto.arima(ts_transDS, xreg = fourier(ts_transDS, K = i), # K = i number of harmonics
+                    seasonal = FALSE, lambda = 1, stepwise = FALSE, approximation = FALSE)
+  
+  # save plots
+  plots[[i]] <- fit %>% 
+                forecast(xreg = fourier(ts_transDS, K = i, h = 28)) %>% 
+                autoplot() +
+                xlab(paste('K=',i,'  AICc =', round(fit[['aicc']],2))) +
+                ylab('') 
+  
+}
+
+# plot
+gridExtra::grid.arrange(
+  plots[[1]],
+  plots[[2]],
+  plots[[3]],
+  nrow = 3
+)
+
+
 ```
 
 
-
 # TBATS: Modelo trigonométrico, BoxCox, Autoregresivo, estacional.
+
+Vemos que se consiguio un modelo ARMA(0,0), sin damping y _dos_ coeficientes de fourier con estacionalidad 7. (Lo que habíamos ya conseguido). Vemos que es MUY parecdio al modelo ARIMA, aunque con una tendencia de crecimiento aún más pequeña.
+```{r}
+# tbats model
+fit3 <- ts_trans %>% tbats(use.box.cox = FALSE)
+
+# look model
+fit3
+
+# predict
+fit3 %>% forecast(h = 28, level = c(80,95)) %>% autoplot()
+
+```
+
+
 
 
 
