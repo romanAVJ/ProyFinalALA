@@ -35,17 +35,16 @@ Graficamos la serie de tiempo y su posible estacionalidad
 
 ```{r edatransplot}
 # plot time series
-autoplot(ts_trans, color = 'navy') + theme_minimal()
-
+autoplot(ts_trans, color = 'navy') + xlab('Tiempo') + ylab('Transacciones') +  theme_minimal() + theme(axis.text.x = element_blank(), legend.position = "none") + ggtitle('Serie de tiempo')
 # plot seasonality
 # linear
-ggseasonplot(ts_trans, season.labels = TRUE) + theme_minimal()
+ggseasonplot(ts_trans, season.labels = TRUE, show.legend = FALSE) +xlab('Día de la semana') + ylab('Transacciones') +  theme_minimal() + ggtitle('Serie de tiempo estacional sin nivel') + theme(legend.position = "none")
 
 #polar
-ggseasonplot(ts_trans, season.labels = TRUE, polar = TRUE) + theme_minimal()
+ggseasonplot(ts_trans, season.labels = TRUE, polar = TRUE) +xlab('Día de la semana') + ylab('Transacciones') +  theme_minimal() + ggtitle('Serie de tiempo estacional sin nivel') +  theme(legend.position = "none")
 
 # mean value by day
-ggsubseriesplot(ts_trans)
+ggsubseriesplot(ts_trans) + xlab('Tiempo') + ylab('Transacciones') +  theme_minimal() +  ggtitle('Serie de tiempo estacionalizada sin nivel')
 
 #lag plots
 gglagplot(ts_trans) # look all the noise except for lag 7 
@@ -117,7 +116,11 @@ df_fft <- data.frame(coef = fft(trans60) / 70, freqindex = 1:70)
 # look to the spectrum
 df_fft[2:n,] %>% 
   ggplot(aes(freqindex, Mod(num_trans))) + 
-  geom_line() 
+  geom_line(color = 'black') + 
+  geom_point(color = 'red') + 
+  xlab('Índice de frecuencia') +
+  ylab('Módulo complejo') +
+  theme_minimal()
 
 # identify peaks
 df_fft[ Mod(df_fft$num_trans) > 7.5 & df_fft$freqindex < n/2, 'freqindex' ] - 1
@@ -154,8 +157,8 @@ nff <-  function(x = NULL, n = NULL, up = 10L, plot = TRUE, add = FALSE, main = 
   idff <-  fft(dff/N, inverse = TRUE) ### ! N - 73
   if(plot){
     if(!add){
-      plot(x = t, y = x, pch = 16L, xlab = "Time", ylab = "Measurement",
-        main = ifelse(is.null(main), paste(n, "harmonics"), main))
+      plot(x = t, y = x, pch = 16L, xlab = "Tiempo", ylab = "Transacciones",
+        main = ifelse(is.null(main), paste(n, "armónicas"), main))
       lines(y = Mod(idff), x = t, col = adjustcolor(1L, alpha = 0.5))
     }
     lines(y = Mod(indff), x = nt, ...)
@@ -171,7 +174,7 @@ nff <-  function(x = NULL, n = NULL, up = 10L, plot = TRUE, add = FALSE, main = 
 # look different number of armonics
 nff(x = trans60, n = 7L, up = 70L, col = 2L)
 nff(x = trans60, n = 14L, up = 200L, col = 'navy')
-nff(x = trans60, n = 20L, up = 200L, col = 'green')
+nff(x = trans60, n = 20L, up = 200L, col = '#FDE725FF')
 
 ```
 Grafiquemos todas las armónicas
@@ -181,7 +184,7 @@ Grafiquemos todas las armónicas
 colors <- viridis::viridis(15)
 for(i in 1:15){
   ad = ifelse(i == 1, FALSE, TRUE)
-  nff(x = trans60, n = i, up = 100L, col = colors[i], add = ad, main = "All waves up to 15th harmonic")
+  nff(x = trans60, n = i, up = 100L, col = colors[i], add = ad, main = "Todos los wavelets hasta la armónica 15")
 }
 
 
@@ -231,6 +234,16 @@ fit2 %>% residuals() %>% qqnorm() # 3 outliers
 fit2 %>% residuals() %>% qqline() 
 ```
 
+## Ajuste visual
+```{r}
+# plot
+
+plot(fit2$x)
+lines(fitted(fit2),col="blue", lty = 2, lwd = 0.5)
+```
+
+
+
 ## Predicción 
 
 Predecimos para las dos semanas con doble IC al nivel 80% y 95%.
@@ -277,8 +290,22 @@ gridExtra::grid.arrange(
   nrow = 3
 )
 
+fit4 <- auto.arima(ts_transDS, xreg = fourier(ts_transDS, K = i), # K = i number of harmonics
+                    seasonal = FALSE, lambda = 1, stepwise = FALSE, approximation = FALSE)
+
 
 ```
+
+## Ajuste visual
+```{r}
+# plot
+plot(fit4$x) # no me sale
+lines(fitted(fit4),col="blue", lty = 3, lwd = 0.5)
+
+# residuals
+plot(fit4$residuals)
+```
+
 
 
 # TBATS: Modelo trigonométrico, BoxCox, Autoregresivo, estacional.
@@ -296,6 +323,11 @@ fit3 %>% forecast(h = 28, level = c(80,95)) %>% autoplot()
 
 ```
 
+## Ajuste visual
+```{r}
+plot(fit3$x)
+lines(fitted(fit3),col="blue", lty = 2, lwd = 0.5)
+```
 
 
 
