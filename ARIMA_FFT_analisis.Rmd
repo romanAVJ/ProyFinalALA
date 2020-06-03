@@ -9,6 +9,8 @@ library(forecast)
 library(dplyr)
 library(lubridate)
 library(purrr)
+library(data.table)
+library(TSA)
 ```
 
 
@@ -35,6 +37,7 @@ Graficamos la serie de tiempo y su posible estacionalidad
 
 ```{r edatransplot}
 # plot time series
+plot.ts(ts_trans)
 autoplot(ts_trans, color = 'navy') + xlab('Tiempo') + ylab('Transacciones') +  theme_minimal() + theme(axis.text.x = element_blank(), legend.position = "none") + ggtitle('Serie de tiempo')
 # plot seasonality
 # linear
@@ -63,7 +66,8 @@ descomposedTS %>% autoplot()
 Usamos el método de Victor Guerrero para encontrar la transofrmación estabilizadora de varianza
 ```{r}
 # lambda
-lambda <- df_trans %>%  BoxCox.lambda(method = 'guerrero') # lambda = 1 ==> no more changes
+lambda <- ts_trans %>%  BoxCox.lambda(method = 'guerrero') # lambda = 1 ==> no more changes
+#ts_trans <- BoxCox(ts_trans, lambda = lambda)
 ```
 
 ### Diferenciación
@@ -81,13 +85,13 @@ ggtsdisplay(ts_transD)
 
 
 # function to determine number of appropiate differences
-ndif <- ndiffs(ts_trans) #0 
-
+(ndif <- ndiffs(ts_trans)) #0 
+#(p <- periodogram(ts_trans))
 # level
 mu <- mean(ts_trans)
 
 # new serie
-ts_trans <- ts_trans - mu
+#ts_trans <- ts_trans - mu
 ```
 
 
@@ -204,9 +208,10 @@ Se realizó una búsqueda más potente, pero la log verosimilitud mejoró práct
 
 ```{r}
 # recomended model from forecast package
-fit1 <- auto.arima(ts_trans, approximation = FALSE,  stepwise = FALSE) # harder search
+#fit1 <- auto.arima(ts_trans, approximation = FALSE,  stepwise = FALSE) # harder search
 fit2 <- auto.arima(ts_trans) # simpler search
-
+#fit1
+fit2
 ```
 
 Por lo anterior, hacemos el ajuste del modelo ARIMA(0,0,0)(0,1,1)[7]
@@ -214,6 +219,7 @@ Por lo anterior, hacemos el ajuste del modelo ARIMA(0,0,0)(0,1,1)[7]
 ```{r}
 # look ACF and PACF 
 ts_trans %>% diff(lag = 7) %>% ggtsdisplay()
+#ggtsdisplay(fit2)
 ```
 Vemos que efectivamente es un modelo ARIMA(0,0,0)(0,1,1)[7], aunque pudiera pensarse también en un ARIMA(3,0,0)(1,1,0)[7] cuyos coeficientes 1 y 2 son ceros. Por tanto trabajaremos con _fit2_ (si da tiempo metemos este ultimo modelo).
 
@@ -237,8 +243,11 @@ fit2 %>% residuals() %>% qqline()
 ## Ajuste visual
 ```{r}
 # plot
+# serie original con una diferencia
+serie <- diff(ts_trans, differences = 1, lag = 7)
 
 plot(fit2$x)
+#lines(ts_trans, col = "red")
 lines(fitted(fit2),col="blue", lty = 2, lwd = 0.5)
 ```
 
@@ -250,7 +259,7 @@ Predecimos para las dos semanas con doble IC al nivel 80% y 95%.
 
 ```{r}
 # forecast
-fit2 %>% forecast(h = 28, level = c(80,95)) %>% autoplot()
+fit2 %>% forecast(h = 14, level = c(80,95)) %>% autoplot()
 
 
 ```
@@ -265,17 +274,17 @@ Vemos que el que mejor captura la información es el que tiene 3 coeficientes de
 plots <- list()
 
 # take out seasonality
-ts_transDS <- ts_trans %>% diff(lag = 7)
+#ts_transDS <- ts_trans %>% diff(lag = 7)
 
 # routine to gather the best number of harmonics
 for (i in 1:3){
   # fit model
-  fit <- auto.arima(ts_transDS, xreg = fourier(ts_transDS, K = i), # K = i number of harmonics
+  fit <- auto.arima(ts_trans, xreg = fourier(ts_trans, K = i), # K = i number of harmonics
                     seasonal = FALSE, lambda = 1, stepwise = FALSE, approximation = FALSE)
   
   # save plots
   plots[[i]] <- fit %>% 
-                forecast(xreg = fourier(ts_transDS, K = i, h = 28)) %>% 
+                forecast(xreg = fourier(ts_trans, K = i, h = 14)) %>% 
                 autoplot() +
                 xlab(paste('K=',i,'  AICc =', round(fit[['aicc']],2))) +
                 ylab('') 
@@ -290,9 +299,13 @@ gridExtra::grid.arrange(
   nrow = 3
 )
 
-fit4 <- auto.arima(ts_transDS, xreg = fourier(ts_transDS, K = i), # K = i number of harmonics
-                    seasonal = FALSE, lambda = 1, stepwise = FALSE, approximation = FALSE)
+fit4 <- auto.arima(ts_trans, xreg = fourier(ts_trans, frequK = 3), 
+                   seasonal = TRUE, lambda = 1, stepwise = FALSE, 
+                   approximation = FALSE)  # K = i number of harmonics
+fit4
+#fit4 <- arima(ts_trans,seasonal = list(order=c(0,1,0), period = 7), xreg = fourier(ts_trans, K = 3))
 
+autoplot(forecast(fit4, xreg = fourier(ts_trans, K = 3,h = 14)))
 
 ```
 
@@ -300,10 +313,14 @@ fit4 <- auto.arima(ts_transDS, xreg = fourier(ts_transDS, K = i), # K = i number
 ```{r}
 # plot
 plot(fit4$x) # no me sale
-lines(fitted(fit4),col="blue", lty = 3, lwd = 0.5)
+#lines(serie, col = "blue")
+lines(fit4$fitted,col="blue", lty = 3, lwd = 0.5)
 
 # residuals
-plot(fit4$residuals)
+plot(fit4$residuals, col = "red")
+lines(fit2$x, col = "green")
+lines(serie, col = "blue")
+lines(ts_trans, col = "yellow")
 ```
 
 
@@ -313,20 +330,49 @@ plot(fit4$residuals)
 Vemos que se consiguio un modelo ARMA(0,0), sin damping y _dos_ coeficientes de fourier con estacionalidad 7. (Lo que habíamos ya conseguido). Vemos que es MUY parecdio al modelo ARIMA, aunque con una tendencia de crecimiento aún más pequeña.
 ```{r}
 # tbats model
-fit3 <- ts_trans %>% tbats(use.box.cox = FALSE)
-
+(fit3 <- ts_trans %>% tbats(use.box.cox = FALSE))
+#fit3 <- tbats(ts_trans)
 # look model
 fit3
 
 # predict
-fit3 %>% forecast(h = 28, level = c(80,95)) %>% autoplot()
+fit3 %>% forecast(h = 14, level = c(80,95)) %>% autoplot()
 
 ```
 
 ## Ajuste visual
 ```{r}
-plot(fit3$x)
+plot(fit3$y)
 lines(fitted(fit3),col="blue", lty = 2, lwd = 0.5)
+```
+
+Comparación entre modelos
+```{r}
+plot(ts_trans, main ="Serie Real vs Modelos", ylab = "Transacciones", xlab = "Tiempo")
+lines(fit2$fitted, col = "blue", lty = 2)
+lines(fit4$fitted, col = "green", lty = 2)
+lines(fit3$fitted.values, col = "red", lty = 2)
+legend("topright",legend=c("ARIMA", "Reg Fourier", "TBATS"), lty=c(0,0), pch=c(16, 16), col=c("blue", "green", "red"))
+```
+
+Múltiples predicciones
+```{r}
+txnNuevas <- read.csv(file = 'Data/lastTrans.csv', header = TRUE, stringsAsFactors = FALSE)
+txns <- ts(txnNuevas$num_trans, start = c(2039,3), frequency = 7)
+
+
+pronos1 <- forecast(fit2, h = 7,level = 80)
+pronos2 <- forecast(fit4, xreg = fourier(ts_trans, K = 3,h = 7),level = 80)
+pronos3 <- forecast(fit3, h = 7,level = 80)
+ts.plot(txns,pronos1$mean,pronos2$mean, pronos3$mean, gpars = list(col = c("black", "blue", "green", "red"),main ="Valores reales vs pronosticos"))
+legend("topright",legend=c("ARIMA", "Reg Fourier", "TBATS"), lty=c(0,0), pch=c(16, 16), col=c("blue", "green", "red"))
+```
+
+Calidad de los pronósticos
+```{r}
+accuracy(pronos1,txns)
+accuracy(pronos2,txns)
+accuracy(pronos3,txns)
 ```
 
 

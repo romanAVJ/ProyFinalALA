@@ -15,44 +15,49 @@ require(plotrix)
 
 ```{r}
 # Lectura de archivos
-#datos = read.csv("ventas_walmart_tepeyac.csv")
+datos = read.csv("Data/trans_all.csv", header = TRUE)
 # Esta opción es para cargar la base de datos directo en R
-datos = ventas_walmart_tepeyac$v_txs
+txns = rev(datos$num_trans)
+n = length(txns)
 # Declarar nuestra serie de tiempo
-serie = ts(datos,star=c(2019,06,01),frequency = 365)
+serie = ts(txns[(n-69):n])
 plot.ts(serie)
+
+# Partimos la serie para analizarla por periodos
+plot.ts(ts(txns[(n-80):n]))
 ```
 
 ```{r}
 # Convertir la serie de tiempo en estacionaria
 # Transformacion para estabilizar la varianza
-lambda <- BoxCox.lambda(serie,method ="guerrero")
+lambda <- BoxCox.lambda(serie,method = "guerrero")
 cat("Lambda metodo Guerrero: ",lambda)
 serie1 <- BoxCox(serie, lambda = lambda)
 plot.ts(serie1)
 
 # Toma de diferencias para estabilizar el nivel
-tsstationary <- diff(serie1, differences=1)
-tsstationary <- diff(serie1, differences=1,lag = 14)
-ggtsdisplay(tsstationary, main = "Serie estacionaria")
+tsstationary1 <- diff(serie1, differences=1, lag = 7)
+tsstationary2 <- diff(serie1, differences=1,lag = 14)
+ggtsdisplay(tsstationary1, main = "Serie estacionaria, dif en 7")
+ggtsdisplay(tsstationary2, main = "Serie estacionaria, dif en 14")
 
 # Buscamos la menor desviación estandar para definir las diferencias
-sd(tsstationary)
+sd(tsstationary1)
 
 # mismas gráficas que la anterior (ggtsdisplay), pero por separado
-plot.ts(tsstationary)
-ggAcf(tsstationary,lag.max = 24,ci=.95)
-ggPacf(tsstationary,lag.max = 24,ci=.95)
+#plot.ts(tsstationary1)
+#ggAcf(tsstationary1,lag.max = 24,ci=.95)
+#ggPacf(tsstationary1,lag.max = 24,ci=.95)
 ```
 
 ```{r}
 # Modelo recomendado por el método auto.arima
-auto.arima(diff(serie,lag=14))
+auto.arima(serie)
 ```
 
 ```{r}
 # Contrucción del modelo
-fitARIMA <- arima(serie,order=c(7,0,0),seasonal = list(order=c(1,1,0), period = 14),fixed=c(0,0,0,0,0,0,NA,NA))
+fitARIMA <- arima(serie1, order=c(0,0,0),seasonal = list(order=c(0,1,1), period = 14))
 fitARIMA
 
 # Coeficientes con sus intervalos de confianza
@@ -60,12 +65,12 @@ y = coef(fitARIMA)
 confint(fitARIMA,level=.95)
 
 # Funciones de Autocorrelación
-ggAcf(fitARIMA,lag.max = 24,ci=.95)
+ggAcf(fitARIMA,lag.max = 18,ci=.95)
 ggPacf(fitARIMA,lag.max = 24,ci=.95)
 
 #Fitted values
 serieEst <- fitted(fitARIMA)
-ts.plot(serie, serieEst, gpars = list(col = c("black", "red"), main ="Serie Real vs Modelo"))
+ts.plot(serie1, serieEst, gpars = list(col = c("black", "red"), main ="Serie Real vs Modelo"))
 ```
 
 ```{r}
@@ -100,12 +105,13 @@ qqline(residuos)
 
 ```{r}
 # Pronosticos
-pronos <- forecast(fitARIMA,h=51,level = 70)
+pronos <- forecast(fitARIMA,h=7,level = 80)
 autoplot(pronos)
 #fitARIMA %>% forecast(h=60) %>% autoplot()
 
 #Validacion de pronosticos
-obsReales <- ts(walmart_tepeyac_validacion$v_txs,star=c(2019,128),frequency = 365)
+txnNuevas <- read.csv(file = 'Data/lastTrans.csv', header = TRUE)
+obsReales <- ts(txnNuevas, start = 71)
 # Grafica Valores reales vs pronosticos
 ts.plot(obsReales, pronos$mean, gpars = list(col = c("black", "red"),main ="Valores reales vs pronosticos"))
 # Grafica Valores reales vs Int. Conf. del 70%
@@ -113,7 +119,7 @@ ts.plot(obsReales, pronos$upper, pronos$lower, gpars = list(col = c("black", "bl
 
 residuos2 <- obsReales - pronos$mean
 # Grafica de los residuos
-plot(residuos2,main ="Residuos vs Int. Conf. del 70%")
+plot(residuos2,main ="Residuos vs Int. Conf. del 80%")
 lines(pronos$mean - pronos$lower, col = "blue", lty = 2)
 lines(pronos$mean - pronos$upper, col = "blue", lty = 2)
 ```
