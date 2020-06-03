@@ -299,7 +299,7 @@ gridExtra::grid.arrange(
   nrow = 3
 )
 
-fit4 <- auto.arima(ts_trans, xreg = fourier(ts_trans, frequK = 3), 
+fit4 <- auto.arima(ts_trans, xreg = fourier(ts_trans, K = 3), 
                    seasonal = TRUE, lambda = 1, stepwise = FALSE, 
                    approximation = FALSE)  # K = i number of harmonics
 fit4
@@ -348,7 +348,7 @@ lines(fitted(fit3),col="blue", lty = 2, lwd = 0.5)
 
 Comparación entre modelos
 ```{r}
-plot(ts_trans, main ="Serie Real vs Modelos", ylab = "Transacciones", xlab = "Tiempo")
+plot(ts_trans, main ="Serie original vs Modelos", ylab = "Transacciones", xlab = "Tiempo")
 lines(fit2$fitted, col = "blue", lty = 2)
 lines(fit4$fitted, col = "green", lty = 2)
 lines(fit3$fitted.values, col = "red", lty = 2)
@@ -360,11 +360,10 @@ Múltiples predicciones
 txnNuevas <- read.csv(file = 'Data/lastTrans.csv', header = TRUE, stringsAsFactors = FALSE)
 txns <- ts(txnNuevas$num_trans, start = c(2039,3), frequency = 7)
 
-
 pronos1 <- forecast(fit2, h = 7,level = 80)
 pronos2 <- forecast(fit4, xreg = fourier(ts_trans, K = 3,h = 7),level = 80)
 pronos3 <- forecast(fit3, h = 7,level = 80)
-ts.plot(txns,pronos1$mean,pronos2$mean, pronos3$mean, gpars = list(col = c("black", "blue", "green", "red"),main ="Valores reales vs pronosticos"))
+ts.plot(txns,pronos1$mean,pronos2$mean, pronos3$mean, gpars = list(col = c("black", "blue", "green", "red"),main ="Valores reales vs pronósticos", ylab = "Transacciones", xlab = "Tiempo"))
 legend("topright",legend=c("ARIMA", "Reg Fourier", "TBATS"), lty=c(0,0), pch=c(16, 16), col=c("blue", "green", "red"))
 ```
 
